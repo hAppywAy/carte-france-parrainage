@@ -351,7 +351,7 @@ var COLORS = {"ARTHAUD Nathalie": "#8B0000", "ASSELINEAU François": "#1B2A49", 
     subdomains: 'abcd'
   }).addTo(map);
 
-  var GRAY = '#aaa';
+  var GRAY = '#888';
   var activeCandidats = [];
   var activeRegion = null;
   var activeDepts = [];
@@ -456,7 +456,7 @@ var COLORS = {"ARTHAUD Nathalie": "#8B0000", "ASSELINEAU François": "#1B2A49", 
   // Create all individual markers
   COMMUNES.forEach(function(c) {
     var color = c.c2 ? getColor(c.c2) : GRAY;
-    var radius = c.c2 ? 5 : 3;
+    var radius = 7;
     var marker = L.circleMarker([c.la, c.lo], {
       radius: radius,
       fillColor: color,
@@ -479,24 +479,20 @@ var COLORS = {"ARTHAUD Nathalie": "#8B0000", "ASSELINEAU François": "#1B2A49", 
     var zoom = map.getZoom();
     var wantClusters = zoom < CLUSTER_ZOOM;
 
-    if (wantClusters && currentMode !== 'clusters') {
-      // Switch to clusters
+    // Always clean up old clusters
+    clusterMarkers.forEach(function(m) { map.removeLayer(m); });
+    clusterMarkers = [];
+
+    if (wantClusters) {
+      // Hide individual markers, show clusters
       markers.forEach(function(m) { m.setStyle({ fillOpacity: 0, opacity: 0 }); m.setRadius(0); });
       buildClusters();
       clusterMarkers.forEach(function(m) { m.addTo(map); });
       currentMode = 'clusters';
-    } else if (!wantClusters && currentMode !== 'markers') {
-      // Switch to individual markers
-      clusterMarkers.forEach(function(m) { map.removeLayer(m); });
-      clusterMarkers = [];
+    } else {
+      // Show individual markers
       applyMarkerFilters();
       currentMode = 'markers';
-    } else if (wantClusters && currentMode === 'clusters') {
-      // Rebuild clusters (filters changed)
-      buildClusters();
-      clusterMarkers.forEach(function(m) { m.addTo(map); });
-    } else {
-      applyMarkerFilters();
     }
   }
 
@@ -516,8 +512,7 @@ var COLORS = {"ARTHAUD Nathalie": "#8B0000", "ASSELINEAU François": "#1B2A49", 
     var parrainageCount = 0;
     markers.forEach(function(m) {
       var c = m._d;
-      var state = isFiltered(c);
-      if (state === 'visible') {
+      if (isVisible(c)) {
         m.setStyle({ fillOpacity: m._origO, opacity: 1 });
         m.setRadius(m._origR);
         visibleCount++;
