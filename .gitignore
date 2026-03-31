@@ -1,0 +1,6 @@
+# Tout ignorer
+*
+
+# Sauf ces fichiers
+!.gitignore
+!index.html
