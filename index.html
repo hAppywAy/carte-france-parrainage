@@ -116,6 +116,85 @@ html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, 'Sego
   letter-spacing: 0.5px;
 }
 
+.cluster-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  color: #fff;
+  font-weight: 700;
+  border: 2px solid rgba(255,255,255,0.9);
+  box-shadow: 0 1px 6px rgba(0,0,0,0.3);
+  text-shadow: 0 1px 2px rgba(0,0,0,0.4);
+  cursor: pointer;
+}
+
+.dept-picker {
+  position: relative;
+  width: 260px;
+}
+.dept-picker-input {
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 14px;
+  outline: none;
+  cursor: text;
+}
+.dept-picker-input:focus { border-color: #4472C4; }
+.dept-picker-dropdown {
+  display: none;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  max-height: 200px;
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid #ccc;
+  border-top: none;
+  border-radius: 0 0 4px 4px;
+  z-index: 2000;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+.dept-picker-dropdown.open { display: block; }
+.dept-picker-option {
+  padding: 6px 10px;
+  font-size: 13px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.dept-picker-option:hover { background: #f0f4ff; }
+.dept-picker-option.selected { background: #e0e8f5; font-weight: 600; }
+.dept-picker-option .check { width: 16px; color: #4472C4; font-weight: bold; }
+
+.dept-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+.dept-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #4472C4;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 12px;
+  cursor: pointer;
+}
+.dept-chip:hover { background: #3561a8; }
+.dept-chip .x { font-size: 13px; margin-left: 2px; }
+
+#sidebar .dept-picker { width: 100%; }
+#sidebar .dept-picker-input { width: 100%; }
+
 .stats-bar {
   background: white;
   padding: 8px 14px;
@@ -243,7 +322,11 @@ html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, 'Sego
   <h3>Region</h3>
   <select id="mobile-region"><option value="">Toutes les regions</option></select>
   <h3>Departement</h3>
-  <select id="mobile-dept"><option value="">Tous les departements</option></select>
+  <div class="dept-picker" id="mobile-dept-picker">
+    <input class="dept-picker-input" placeholder="Rechercher un departement..." autocomplete="off">
+    <div class="dept-picker-dropdown"></div>
+    <div class="dept-chips"></div>
+  </div>
   <h3>Candidats 2022</h3>
   <div id="mobile-legend"></div>
 </div>
@@ -269,9 +352,9 @@ var COLORS = {"ARTHAUD Nathalie": "#8B0000", "ASSELINEAU François": "#1B2A49", 
   }).addTo(map);
 
   var GRAY = '#aaa';
-  var activeCandidat = null;
+  var activeCandidats = [];
   var activeRegion = null;
-  var activeDept = null;
+  var activeDepts = [];
   var markers = [];
 
   function getColor(candidat) {
@@ -298,7 +381,79 @@ var COLORS = {"ARTHAUD Nathalie": "#8B0000", "ASSELINEAU François": "#1B2A49", 
       + '</div>';
   }
 
-  // Create all markers
+  // --- PRE-COMPUTE DEPT CLUSTERS ---
+  var CLUSTER_ZOOM = 9;
+  var deptData = {};  // dept_name -> {lat, lon, latSum, lonSum, count, candidates: {name: count}}
+
+  COMMUNES.forEach(function(c) {
+    if (!deptData[c.d]) deptData[c.d] = { latSum: 0, lonSum: 0, count: 0, candidates: {}, region: c.r };
+    var dd = deptData[c.d];
+    dd.latSum += c.la;
+    dd.lonSum += c.lo;
+    dd.count++;
+    if (c.c2) dd.candidates[c.c2] = (dd.candidates[c.c2] || 0) + 1;
+  });
+
+  // Compute centers
+  Object.keys(deptData).forEach(function(d) {
+    var dd = deptData[d];
+    dd.lat = dd.latSum / dd.count;
+    dd.lon = dd.lonSum / dd.count;
+  });
+
+  // Create cluster markers (DivIcon per candidate per dept)
+  var clusterMarkers = [];
+
+  function buildClusters() {
+    // Remove existing
+    clusterMarkers.forEach(function(m) { map.removeLayer(m); });
+    clusterMarkers = [];
+
+    Object.keys(deptData).forEach(function(deptName) {
+      var dd = deptData[deptName];
+
+      // Filter by region/dept
+      if (activeRegion && dd.region !== activeRegion) return;
+      if (activeDepts.length && activeDepts.indexOf(deptName) === -1) return;
+
+      // Get candidates sorted by count, filter by active candidat
+      var cands = [];
+      Object.keys(dd.candidates).forEach(function(name) {
+        if (activeCandidats.length && activeCandidats.indexOf('__none__') !== -1) return;
+        if (activeCandidats.length && activeCandidats.indexOf(name) === -1) return;
+        cands.push({ name: name, count: dd.candidates[name] });
+      });
+      cands.sort(function(a, b) { return b.count - a.count; });
+
+      if (!cands.length) return;
+
+      // Arrange in a circle around dept center
+      var angleStep = (2 * Math.PI) / Math.max(cands.length, 1);
+      if (cands.length > 5) cands = cands.slice(0, 5);
+      var step = 0.12;
+      var totalWidth = (cands.length - 1) * step;
+
+      cands.forEach(function(cand, i) {
+        var lat = dd.lat;
+        var lon = dd.lon - totalWidth / 2 + i * step;
+
+        var size = Math.max(22, Math.min(40, 16 + Math.sqrt(cand.count) * 4));
+        var icon = L.divIcon({
+          className: '',
+          html: '<div class="cluster-icon" style="width:' + size + 'px;height:' + size + 'px;font-size:' + (size * 0.38) + 'px;background:' + getColor(cand.name) + '">' + cand.count + '</div>',
+          iconSize: [size, size],
+          iconAnchor: [size / 2, size / 2]
+        });
+
+        var m = L.marker([lat, lon], { icon: icon });
+        m.bindTooltip(cand.name + ' — ' + deptName + ' (' + cand.count + ')', { direction: 'top' });
+        m._clusterDept = deptName;
+        clusterMarkers.push(m);
+      });
+    });
+  }
+
+  // Create all individual markers
   COMMUNES.forEach(function(c) {
     var color = c.c2 ? getColor(c.c2) : GRAY;
     var radius = c.c2 ? 5 : 3;
@@ -317,16 +472,46 @@ var COLORS = {"ARTHAUD Nathalie": "#8B0000", "ASSELINEAU François": "#1B2A49", 
     markers.push(marker);
   });
 
+  // --- ZOOM-BASED TOGGLE ---
+  var currentMode = null; // 'markers' or 'clusters'
+
+  function updateView() {
+    var zoom = map.getZoom();
+    var wantClusters = zoom < CLUSTER_ZOOM;
+
+    if (wantClusters && currentMode !== 'clusters') {
+      // Switch to clusters
+      markers.forEach(function(m) { m.setStyle({ fillOpacity: 0, opacity: 0 }); m.setRadius(0); });
+      buildClusters();
+      clusterMarkers.forEach(function(m) { m.addTo(map); });
+      currentMode = 'clusters';
+    } else if (!wantClusters && currentMode !== 'markers') {
+      // Switch to individual markers
+      clusterMarkers.forEach(function(m) { map.removeLayer(m); });
+      clusterMarkers = [];
+      applyMarkerFilters();
+      currentMode = 'markers';
+    } else if (wantClusters && currentMode === 'clusters') {
+      // Rebuild clusters (filters changed)
+      buildClusters();
+      clusterMarkers.forEach(function(m) { m.addTo(map); });
+    } else {
+      applyMarkerFilters();
+    }
+  }
+
+  map.on('zoomend', updateView);
+
   // --- FILTERING ---
   function isVisible(c) {
     if (activeRegion && c.r !== activeRegion) return false;
-    if (activeDept && c.d !== activeDept) return false;
-    if (activeCandidat === '__none__') return !c.c2;
-    if (activeCandidat && c.c2 !== activeCandidat) return false;
+    if (activeDepts.length && activeDepts.indexOf(c.d) === -1) return false;
+    if (activeCandidats.length && activeCandidats.indexOf('__none__') !== -1) return !c.c2;
+    if (activeCandidats.length && activeCandidats.indexOf(c.c2) === -1) return false;
     return true;
   }
 
-  function applyFilters() {
+  function applyMarkerFilters() {
     var visibleCount = 0;
     var parrainageCount = 0;
     markers.forEach(function(m) {
@@ -342,6 +527,10 @@ var COLORS = {"ARTHAUD Nathalie": "#8B0000", "ASSELINEAU François": "#1B2A49", 
       }
     });
     updateStats(visibleCount, parrainageCount);
+  }
+
+  function applyFilters() {
+    updateView();
     updateLegendCounts();
   }
 
@@ -369,7 +558,11 @@ var COLORS = {"ARTHAUD Nathalie": "#8B0000", "ASSELINEAU François": "#1B2A49", 
       + '<label>Region</label>'
       + '<select id="region-select"><option value="">Toutes les regions</option></select>'
       + '<label>Departement</label>'
-      + '<select id="dept-select"><option value="">Tous les departements</option></select>';
+      + '<div class="dept-picker" id="desktop-dept-picker">'
+      + '<input class="dept-picker-input" placeholder="Rechercher un departement..." autocomplete="off">'
+      + '<div class="dept-picker-dropdown"></div>'
+      + '<div class="dept-chips"></div>'
+      + '</div>';
     return div;
   };
   controls.addTo(map);
@@ -384,31 +577,91 @@ var COLORS = {"ARTHAUD Nathalie": "#8B0000", "ASSELINEAU François": "#1B2A49", 
     regionSelect.appendChild(opt);
   });
 
-  // Populate depts in both desktop and mobile selects
+  // --- DEPT PICKER ---
+  var allDepts = [];
+  var pickers = [];
+
+  function initPicker(container) {
+    var input = container.querySelector('.dept-picker-input');
+    var dropdown = container.querySelector('.dept-picker-dropdown');
+    var chipsDiv = container.querySelector('.dept-chips');
+    var picker = { input: input, dropdown: dropdown, chipsDiv: chipsDiv };
+    pickers.push(picker);
+
+    input.addEventListener('focus', function() { renderDropdown(picker); dropdown.classList.add('open'); });
+    input.addEventListener('input', function() { renderDropdown(picker); dropdown.classList.add('open'); });
+    document.addEventListener('click', function(e) {
+      if (!container.contains(e.target)) dropdown.classList.remove('open');
+    });
+    return picker;
+  }
+
+  function renderDropdown(picker) {
+    var q = picker.input.value.toLowerCase().trim();
+    var html = '';
+    allDepts.forEach(function(d) {
+      if (q && d.toLowerCase().indexOf(q) === -1) return;
+      var sel = activeDepts.indexOf(d) !== -1;
+      html += '<div class="dept-picker-option' + (sel ? ' selected' : '') + '" data-dept="' + d + '">'
+        + '<span class="check">' + (sel ? '&#10003;' : '') + '</span>'
+        + d + '</div>';
+    });
+    picker.dropdown.innerHTML = html || '<div style="padding:8px;color:#999;font-size:13px">Aucun resultat</div>';
+
+    picker.dropdown.querySelectorAll('.dept-picker-option').forEach(function(el) {
+      el.addEventListener('mousedown', function(e) {
+        e.preventDefault();
+        var dept = el.getAttribute('data-dept');
+        var idx = activeDepts.indexOf(dept);
+        if (idx === -1) { activeDepts.push(dept); } else { activeDepts.splice(idx, 1); }
+        syncAllPickers();
+        applyFilters();
+      });
+    });
+  }
+
+  function renderChips(picker) {
+    var html = '';
+    activeDepts.forEach(function(d) {
+      html += '<span class="dept-chip" data-dept="' + d + '">' + d + '<span class="x">&times;</span></span>';
+    });
+    picker.chipsDiv.innerHTML = html;
+    picker.chipsDiv.querySelectorAll('.dept-chip').forEach(function(el) {
+      el.addEventListener('click', function() {
+        var dept = el.getAttribute('data-dept');
+        var idx = activeDepts.indexOf(dept);
+        if (idx !== -1) activeDepts.splice(idx, 1);
+        syncAllPickers();
+        applyFilters();
+      });
+    });
+  }
+
+  function syncAllPickers() {
+    pickers.forEach(function(p) {
+      renderChips(p);
+      if (p.dropdown.classList.contains('open')) renderDropdown(p);
+    });
+  }
+
   function populateDepts(regionFilter) {
     var deptsSet = {};
     COMMUNES.forEach(function(c) {
       if (!regionFilter || c.r === regionFilter) deptsSet[c.d] = true;
     });
-    ['dept-select', 'mobile-dept'].forEach(function(id) {
-      var sel = document.getElementById(id);
-      if (!sel) return;
-      sel.innerHTML = '<option value="">Tous les departements</option>';
-      Object.keys(deptsSet).sort().forEach(function(d) {
-        var opt = document.createElement('option');
-        opt.value = d; opt.textContent = d;
-        sel.appendChild(opt);
-      });
-    });
+    allDepts = Object.keys(deptsSet).sort();
+    syncAllPickers();
   }
+
+  initPicker(document.getElementById('desktop-dept-picker'));
+  initPicker(document.getElementById('mobile-dept-picker'));
   populateDepts(null);
 
   // Sync region selects
   function onRegionChange(val) {
     activeRegion = val || null;
-    activeDept = null;
+    activeDepts = [];
     populateDepts(activeRegion);
-    // Sync both selects
     var ds = document.getElementById('region-select');
     var ms = document.getElementById('mobile-region');
     if (ds) ds.value = val;
@@ -417,18 +670,6 @@ var COLORS = {"ARTHAUD Nathalie": "#8B0000", "ASSELINEAU François": "#1B2A49", 
   }
   document.getElementById('region-select').addEventListener('change', function(e) { onRegionChange(e.target.value); });
   document.getElementById('mobile-region').addEventListener('change', function(e) { onRegionChange(e.target.value); });
-
-  // Sync dept selects
-  function onDeptChange(val) {
-    activeDept = val || null;
-    var ds = document.getElementById('dept-select');
-    var ms = document.getElementById('mobile-dept');
-    if (ds) ds.value = val;
-    if (ms) ms.value = val;
-    applyFilters();
-  }
-  document.getElementById('dept-select').addEventListener('change', function(e) { onDeptChange(e.target.value); });
-  document.getElementById('mobile-dept').addEventListener('change', function(e) { onDeptChange(e.target.value); });
 
   // Search (both desktop and mobile)
   function doSearch(q) {
@@ -446,34 +687,49 @@ var COLORS = {"ARTHAUD Nathalie": "#8B0000", "ASSELINEAU François": "#1B2A49", 
   document.getElementById('mobile-search').addEventListener('input', function(e) { doSearch(e.target.value.toLowerCase().trim()); });
 
   // --- LEGEND ---
+  function rebuildLegend(container, counts, total) {
+    var withP = Object.values(counts).reduce(function(a,b){return a+b}, 0);
+    var sorted = Object.keys(counts).sort(function(a,b){ return counts[b] - counts[a]; });
+    var html = '';
+    sorted.forEach(function(name) {
+      html += '<div class="legend-item" data-candidat="' + name + '">'
+        + '<div class="legend-dot" style="background:' + getColor(name) + '"></div>'
+        + '<span class="legend-label">' + name + ' (' + counts[name] + ')</span>'
+        + '</div>';
+    });
+    html += '<div class="legend-item" data-candidat="__none__" style="margin-top:6px;border-top:1px solid #eee;padding-top:6px;">'
+      + '<div class="legend-dot" style="background:' + GRAY + '"></div>'
+      + '<span class="legend-label">Sans parrainage (' + (total - withP) + ')</span>'
+      + '</div>';
+    container.innerHTML = html;
+  }
+
   function updateLegendCounts() {
     var counts = {};
     var total = 0;
     COMMUNES.forEach(function(c) {
-      if (isVisible(c) || (!activeCandidat)) {
-        if ((!activeRegion || c.r === activeRegion) && (!activeDept || c.d === activeDept)) {
-          total++;
-          if (c.c2) counts[c.c2] = (counts[c.c2] || 0) + 1;
-        }
+      if ((!activeRegion || c.r === activeRegion) && (!activeDepts.length || activeDepts.indexOf(c.d) !== -1)) {
+        total++;
+        if (c.c2) counts[c.c2] = (counts[c.c2] || 0) + 1;
       }
     });
-    var withP = Object.values(counts).reduce(function(a,b){return a+b}, 0);
-    document.querySelectorAll('.legend-item[data-candidat]').forEach(function(el) {
-      var cand = el.getAttribute('data-candidat');
-      var label = el.querySelector('.legend-label');
-      if (cand === '__none__') {
-        label.textContent = 'Sans parrainage (' + (total - withP) + ')';
-      } else {
-        label.textContent = cand + ' (' + (counts[cand] || 0) + ')';
-      }
-    });
+    // Rebuild both legends (sorted, no zero candidates)
+    var desktopDiv = document.querySelector('.leaflet-bottom.leaflet-right .legend');
+    if (desktopDiv) {
+      var h4 = '<h4>Parrainages 2022</h4>';
+      rebuildLegend(desktopDiv, counts, total);
+      desktopDiv.insertAdjacentHTML('afterbegin', h4);
+    }
+    var mobileDiv = document.getElementById('mobile-legend');
+    if (mobileDiv) rebuildLegend(mobileDiv, counts, total);
+    updateLegendStyles(activeCandidat);
   }
 
-  function updateLegendStyles(candidat) {
+  function updateLegendStyles() {
     document.querySelectorAll('.legend-item[data-candidat]').forEach(function(el) {
       el.classList.remove('active', 'dimmed');
-      if (candidat !== null) {
-        el.classList.add(el.getAttribute('data-candidat') === candidat ? 'active' : 'dimmed');
+      if (activeCandidats.length) {
+        el.classList.add(activeCandidats.indexOf(el.getAttribute('data-candidat')) !== -1 ? 'active' : 'dimmed');
       }
     });
   }
@@ -507,9 +763,10 @@ var COLORS = {"ARTHAUD Nathalie": "#8B0000", "ASSELINEAU François": "#1B2A49", 
       var item = e.target.closest('.legend-item[data-candidat]');
       if (!item) return;
       var cand = item.getAttribute('data-candidat');
-      activeCandidat = (activeCandidat === cand) ? null : cand;
+      var idx = activeCandidats.indexOf(cand);
+      if (idx === -1) { activeCandidats.push(cand); } else { activeCandidats.splice(idx, 1); }
       applyFilters();
-      updateLegendStyles(activeCandidat);
+      updateLegendStyles();
     });
 
     return div;
@@ -548,8 +805,9 @@ var COLORS = {"ARTHAUD Nathalie": "#8B0000", "ASSELINEAU François": "#1B2A49", 
     mRegion.appendChild(opt);
   });
 
-  // Initial stats
+  // Initial view
   updateStats(COMMUNES.length, Object.values(initCounts).reduce(function(a,b){return a+b},0));
+  updateView();
 })();
 
 function toggleSidebar() {
