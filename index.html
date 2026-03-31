@@ -76,7 +76,7 @@ html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, 'Sego
 }
 .legend-item:hover { background: #f0f0f0; }
 .legend-item.active { background: #e0e8f5; }
-.legend-item.dimmed { opacity: 0.4; }
+.legend-item.dimmed { opacity: 0.2; }
 .legend-dot {
   width: 16px;
   height: 16px;
@@ -283,7 +283,7 @@ html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, 'Sego
 }
 #sidebar .legend-item:hover { background: #f0f0f0; }
 #sidebar .legend-item.active { background: #e0e8f5; }
-#sidebar .legend-item.dimmed { opacity: 0.4; }
+#sidebar .legend-item.dimmed { opacity: 0.2; }
 #sidebar .legend-dot {
   width: 14px; height: 14px;
   border-radius: 50%;
@@ -516,7 +516,8 @@ var COLORS = {"ARTHAUD Nathalie": "#8B0000", "ASSELINEAU François": "#1B2A49", 
     var parrainageCount = 0;
     markers.forEach(function(m) {
       var c = m._d;
-      if (isVisible(c)) {
+      var state = isFiltered(c);
+      if (state === 'visible') {
         m.setStyle({ fillOpacity: m._origO, opacity: 1 });
         m.setRadius(m._origR);
         visibleCount++;
@@ -687,17 +688,22 @@ var COLORS = {"ARTHAUD Nathalie": "#8B0000", "ASSELINEAU François": "#1B2A49", 
   document.getElementById('mobile-search').addEventListener('input', function(e) { doSearch(e.target.value.toLowerCase().trim()); });
 
   // --- LEGEND ---
+  function itemClass(candidat) {
+    if (!activeCandidats.length) return 'legend-item';
+    return activeCandidats.indexOf(candidat) !== -1 ? 'legend-item active' : 'legend-item dimmed';
+  }
+
   function rebuildLegend(container, counts, total) {
     var withP = Object.values(counts).reduce(function(a,b){return a+b}, 0);
     var sorted = Object.keys(counts).sort(function(a,b){ return counts[b] - counts[a]; });
     var html = '';
     sorted.forEach(function(name) {
-      html += '<div class="legend-item" data-candidat="' + name + '">'
+      html += '<div class="' + itemClass(name) + '" data-candidat="' + name + '">'
         + '<div class="legend-dot" style="background:' + getColor(name) + '"></div>'
         + '<span class="legend-label">' + name + ' (' + counts[name] + ')</span>'
         + '</div>';
     });
-    html += '<div class="legend-item" data-candidat="__none__" style="margin-top:6px;border-top:1px solid #eee;padding-top:6px;">'
+    html += '<div class="' + itemClass('__none__') + '" data-candidat="__none__" style="margin-top:6px;border-top:1px solid #eee;padding-top:6px;">'
       + '<div class="legend-dot" style="background:' + GRAY + '"></div>'
       + '<span class="legend-label">Sans parrainage (' + (total - withP) + ')</span>'
       + '</div>';
