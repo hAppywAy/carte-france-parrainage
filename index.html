@@ -409,33 +409,39 @@ var COLORS = {"ARTHAUD Nathalie": "#8B0000", "ASSELINEAU François": "#1B2A49", 
     clusterMarkers.forEach(function(m) { map.removeLayer(m); });
     clusterMarkers = [];
 
-    Object.keys(deptData).forEach(function(deptName) {
-      var dd = deptData[deptName];
+    // Recompute counts from visible communes only
+    var liveDept = {};
+    COMMUNES.forEach(function(c) {
+      if (!isVisible(c)) return;
+      if (!c.c2) return;
+      if (!liveDept[c.d]) liveDept[c.d] = { candidates: {}, latSum: 0, lonSum: 0, count: 0 };
+      var dd = liveDept[c.d];
+      dd.candidates[c.c2] = (dd.candidates[c.c2] || 0) + 1;
+      dd.latSum += c.la;
+      dd.lonSum += c.lo;
+      dd.count++;
+    });
 
-      // Filter by region/dept
-      if (activeRegion && dd.region !== activeRegion) return;
-      if (activeDepts.length && activeDepts.indexOf(deptName) === -1) return;
+    Object.keys(liveDept).forEach(function(deptName) {
+      var dd = liveDept[deptName];
+      var lat = dd.latSum / dd.count;
+      var lon = dd.lonSum / dd.count;
 
-      // Get candidates sorted by count, filter by active candidat
       var cands = [];
       Object.keys(dd.candidates).forEach(function(name) {
-        if (activeCandidats.length && activeCandidats.indexOf('__none__') !== -1) return;
-        if (activeCandidats.length && activeCandidats.indexOf(name) === -1) return;
         cands.push({ name: name, count: dd.candidates[name] });
       });
       cands.sort(function(a, b) { return b.count - a.count; });
+      if (cands.length > 5) cands = cands.slice(0, 5);
 
       if (!cands.length) return;
 
-      // Arrange in a circle around dept center
-      var angleStep = (2 * Math.PI) / Math.max(cands.length, 1);
-      if (cands.length > 5) cands = cands.slice(0, 5);
       var step = 0.12;
       var totalWidth = (cands.length - 1) * step;
 
       cands.forEach(function(cand, i) {
-        var lat = dd.lat;
-        var lon = dd.lon - totalWidth / 2 + i * step;
+        var clat = lat;
+        var clon = lon - totalWidth / 2 + i * step;
 
         var size = Math.max(22, Math.min(40, 16 + Math.sqrt(cand.count) * 4));
         var icon = L.divIcon({
@@ -445,7 +451,7 @@ var COLORS = {"ARTHAUD Nathalie": "#8B0000", "ASSELINEAU François": "#1B2A49", 
           iconAnchor: [size / 2, size / 2]
         });
 
-        var m = L.marker([lat, lon], { icon: icon });
+        var m = L.marker([clat, clon], { icon: icon });
         m.bindTooltip(cand.name + ' — ' + deptName + ' (' + cand.count + ')', { direction: 'top' });
         m._clusterDept = deptName;
         clusterMarkers.push(m);
@@ -504,6 +510,7 @@ var COLORS = {"ARTHAUD Nathalie": "#8B0000", "ASSELINEAU François": "#1B2A49", 
     if (activeDepts.length && activeDepts.indexOf(c.d) === -1) return false;
     if (activeCandidats.length && activeCandidats.indexOf('__none__') !== -1) return !c.c2;
     if (activeCandidats.length && activeCandidats.indexOf(c.c2) === -1) return false;
+    if (activeSearch && stripAccents(c.n.toLowerCase()).indexOf(activeSearch) === -1) return false;
     return true;
   }
 
@@ -668,19 +675,23 @@ var COLORS = {"ARTHAUD Nathalie": "#8B0000", "ASSELINEAU François": "#1B2A49", 
   document.getElementById('mobile-region').addEventListener('change', function(e) { onRegionChange(e.target.value); });
 
   // Search (both desktop and mobile)
-  function doSearch(q) {
-    if (q.length < 2) return;
-    for (var i = 0; i < markers.length; i++) {
-      var c = markers[i]._d;
-      if (c.n.toLowerCase().indexOf(q) === 0 && isVisible(c)) {
-        map.setView([c.la, c.lo], 13);
-        markers[i].openPopup();
-        break;
-      }
-    }
+  function stripAccents(s) {
+    return s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[œ]/g, 'oe').replace(/[æ]/g, 'ae');
   }
-  document.getElementById('search-input').addEventListener('input', function(e) { doSearch(e.target.value.toLowerCase().trim()); });
-  document.getElementById('mobile-search').addEventListener('input', function(e) { doSearch(e.target.value.toLowerCase().trim()); });
+
+  var activeSearch = '';
+
+  function doSearch(q) {
+    activeSearch = stripAccents(q.toLowerCase().trim());
+    // Sync both inputs
+    var di = document.getElementById('search-input');
+    var mi = document.getElementById('mobile-search');
+    if (di && di !== document.activeElement) di.value = q;
+    if (mi && mi !== document.activeElement) mi.value = q;
+    applyFilters();
+  }
+  document.getElementById('search-input').addEventListener('input', function(e) { doSearch(e.target.value); });
+  document.getElementById('mobile-search').addEventListener('input', function(e) { doSearch(e.target.value); });
 
   // --- LEGEND ---
   function itemClass(candidat) {
