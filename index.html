@@ -205,6 +205,31 @@ html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, 'Sego
 #sidebar .dept-picker { width: 100%; }
 #sidebar .dept-picker-input { width: 100%; }
 
+.pop-filter {
+  display: flex;
+  gap: 8px;
+}
+.pop-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+}
+.pop-row label {
+  font-size: 12px;
+  color: #666;
+  min-width: 28px;
+}
+.pop-row input {
+  width: 80px;
+  padding: 5px 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 13px;
+  outline: none;
+}
+.pop-row input:focus { border-color: #4472C4; }
+
 .stats-bar {
   background: white;
   padding: 8px 14px;
@@ -337,6 +362,11 @@ html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, 'Sego
     <div class="dept-picker-dropdown"></div>
     <div class="dept-chips"></div>
   </div>
+  <h3>Population</h3>
+  <div class="pop-filter">
+    <div class="pop-row"><label>Min</label><input type="number" id="mobile-pop-min" placeholder="0" min="0"></div>
+    <div class="pop-row"><label>Max</label><input type="number" id="mobile-pop-max" placeholder="∞" min="0"></div>
+  </div>
   <h3>Candidats 2022</h3>
   <div id="mobile-legend"></div>
 </div>
@@ -363,6 +393,8 @@ var COLORS = {"ARTHAUD Nathalie": "#8B0000", "ASSELINEAU François": "#1B2A49", 
 
   var GRAY = '#888';
   var activeCandidats = [];
+  var popMin = null;
+  var popMax = null;
   var activeRegion = null;
   var activeDepts = [];
   var markers = [];
@@ -556,6 +588,8 @@ var COLORS = {"ARTHAUD Nathalie": "#8B0000", "ASSELINEAU François": "#1B2A49", 
     if (activeCandidats.length && activeCandidats.indexOf('__none__') !== -1) return !c.c2;
     if (activeCandidats.length && activeCandidats.indexOf(c.c2) === -1) return false;
     if (activeSearch && stripAccents(c.n.toLowerCase()).indexOf(activeSearch) === -1) return false;
+    if (popMin !== null && (c.p || 0) < popMin) return false;
+    if (popMax !== null && (c.p || 0) > popMax) return false;
     return true;
   }
 
@@ -592,8 +626,10 @@ var COLORS = {"ARTHAUD Nathalie": "#8B0000", "ASSELINEAU François": "#1B2A49", 
   statsControl.addTo(map);
 
   function updateStats(visible, parrainages) {
+    var total = COMMUNES.length;
+    var filtered = visible < total ? ' / ' + total.toLocaleString('fr-FR') : '';
     document.getElementById('stats-bar').innerHTML =
-      '<b>' + visible.toLocaleString('fr-FR') + '</b> communes — <b>' + parrainages.toLocaleString('fr-FR') + '</b> parrainages';
+      '<b>' + visible.toLocaleString('fr-FR') + '</b>' + filtered + ' communes — <b>' + parrainages.toLocaleString('fr-FR') + '</b> parrainages';
   }
 
   // --- CONTROLS ---
@@ -610,6 +646,11 @@ var COLORS = {"ARTHAUD Nathalie": "#8B0000", "ASSELINEAU François": "#1B2A49", 
       + '<input class="dept-picker-input" placeholder="Rechercher un departement..." autocomplete="off">'
       + '<div class="dept-picker-dropdown"></div>'
       + '<div class="dept-chips"></div>'
+      + '</div>'
+      + '<label>Population</label>'
+      + '<div class="pop-filter">'
+      + '<div class="pop-row"><label>Min</label><input type="number" id="pop-min" placeholder="0" min="0"></div>'
+      + '<div class="pop-row"><label>Max</label><input type="number" id="pop-max" placeholder="∞" min="0"></div>'
       + '</div>';
     return div;
   };
@@ -737,6 +778,23 @@ var COLORS = {"ARTHAUD Nathalie": "#8B0000", "ASSELINEAU François": "#1B2A49", 
   }
   document.getElementById('search-input').addEventListener('input', function(e) { doSearch(e.target.value); });
   document.getElementById('mobile-search').addEventListener('input', function(e) { doSearch(e.target.value); });
+
+  // Population filter
+  function onPopChange() {
+    var mn = document.getElementById('pop-min'); var mmn = document.getElementById('mobile-pop-min');
+    var mx = document.getElementById('pop-max'); var mmx = document.getElementById('mobile-pop-max');
+    var minVal = (mn && mn.value) || (mmn && mmn.value) || '';
+    var maxVal = (mx && mx.value) || (mmx && mmx.value) || '';
+    popMin = minVal ? parseInt(minVal) : null;
+    popMax = maxVal ? parseInt(maxVal) : null;
+    if (mn) mn.value = minVal; if (mmn) mmn.value = minVal;
+    if (mx) mx.value = maxVal; if (mmx) mmx.value = maxVal;
+    applyFilters();
+  }
+  ['pop-min','pop-max','mobile-pop-min','mobile-pop-max'].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) el.addEventListener('input', onPopChange);
+  });
 
   // --- LEGEND ---
   function itemClass(candidat) {
