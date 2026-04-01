@@ -107,15 +107,6 @@ html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, 'Sego
   color: #444;
   white-space: nowrap;
 }
-.commune-dot {
-  width: 100%; height: 100%;
-  border-radius: 50%;
-  box-sizing: border-box;
-}
-.commune-dot.tri {
-  border-radius: 0;
-  clip-path: polygon(50% 0%, 0% 100%, 100% 100%);
-}
 
 .controls {
   background: white;
@@ -594,28 +585,51 @@ var COLORS = {"ARTHAUD Nathalie": "#8B0000", "ASSELINEAU François": "#1B2A49", 
     });
   }
 
-  // Create all individual markers
-  function makeIcon(c, size) {
-    var color = c.c2 ? getColor(c.c2) : GRAY;
-    var borderColor = getNuanceBorder(c.c) || '#fff';
-    var borderW = getNuanceBorder(c.c) ? 3 : 0.5;
-    var fillOp = c.c2 ? 0.85 : 0.3;
-    var isReelu = REELUS.has(c.c);
-    var cls = 'commune-dot' + (isReelu ? ' tri' : '');
-    var html = '<div class="' + cls + '" style="background:' + color + ';border:' + borderW + 'px solid ' + borderColor + ';opacity:' + fillOp + '"></div>';
-    return L.divIcon({ className: '', html: html, iconSize: [size, size], iconAnchor: [size / 2, size / 2] });
-  }
+  // Canvas triangle marker (performant — no DOM elements)
+  var TriangleMarker = L.CircleMarker.extend({
+    _updatePath: function() {
+      this._renderer._updateTriangle(this);
+    }
+  });
+  L.Canvas.include({
+    _updateTriangle: function(layer) {
+      if (!this._drawing || layer._empty()) return;
+      var p = layer._point, ctx = this._ctx,
+          r = Math.max(Math.round(layer._radius), 1);
+      this._drawnLayers[layer._leaflet_id] = layer;
+      ctx.beginPath();
+      ctx.moveTo(p.x, p.y - r);
+      ctx.lineTo(p.x - r, p.y + r);
+      ctx.lineTo(p.x + r, p.y + r);
+      ctx.closePath();
+      this._fillStroke(ctx, layer);
+    }
+  });
 
+  // Create all individual markers
   COMMUNES.forEach(function(c) {
-    var size = 14;
-    var marker = L.marker([c.la, c.lo], { icon: makeIcon(c, size) }).addTo(map);
+    var color = c.c2 ? getColor(c.c2) : GRAY;
+    var radius = 7;
+    var isReelu = REELUS.has(c.c);
+    var opts = {
+      radius: radius,
+      fillColor: color,
+      color: getNuanceBorder(c.c) || '#fff',
+      weight: getNuanceBorder(c.c) ? 5 : 0.5,
+      opacity: 1,
+      fillOpacity: c.c2 ? 0.85 : 0.3
+    };
+    var marker = isReelu
+      ? new TriangleMarker([c.la, c.lo], opts).addTo(map)
+      : L.circleMarker([c.la, c.lo], opts).addTo(map);
     marker.bindPopup(popupHtml(c), { maxWidth: 340 });
     var tooltipText = c.n + (c.m ? ' — ' + c.m : '');
-    if (REELUS.has(c.c)) tooltipText += ' (réélu)';
+    if (isReelu) tooltipText += ' (réélu)';
     if (NUANCES[c.c]) tooltipText += ' (' + NUANCES[c.c] + ' : ' + (NUANCE_LABELS[NUANCES[c.c]] || '') + ')';
     marker.bindTooltip(tooltipText, { direction: 'top' });
     marker._d = c;
-    marker._origSize = size;
+    marker._origR = radius;
+    marker._origO = c.c2 ? 0.85 : 0.3;
     markers.push(marker);
   });
 
@@ -634,7 +648,7 @@ var COLORS = {"ARTHAUD Nathalie": "#8B0000", "ASSELINEAU François": "#1B2A49", 
 
     if (wantClusters) {
       // Hide individual markers, show clusters
-      markers.forEach(function(m) { m.setOpacity(0); m.getElement() && (m.getElement().style.pointerEvents = 'none'); });
+      markers.forEach(function(m) { m.setStyle({ fillOpacity: 0, opacity: 0 }); m.setRadius(0); });
       buildClusters();
       clusterMarkers.forEach(function(m) { m.addTo(map); });
       currentMode = 'clusters';
@@ -664,15 +678,14 @@ var COLORS = {"ARTHAUD Nathalie": "#8B0000", "ASSELINEAU François": "#1B2A49", 
     var parrainageCount = 0;
     markers.forEach(function(m) {
       var c = m._d;
-      var el = m.getElement();
       if (isVisible(c)) {
-        m.setOpacity(1);
-        if (el) el.style.pointerEvents = '';
+        m.setStyle({ fillOpacity: m._origO, opacity: 1 });
+        m.setRadius(m._origR);
         visibleCount++;
         if (c.c2) parrainageCount++;
       } else {
-        m.setOpacity(0);
-        if (el) el.style.pointerEvents = 'none';
+        m.setStyle({ fillOpacity: 0, opacity: 0 });
+        m.setRadius(0);
       }
     });
     updateStats(visibleCount, parrainageCount);
