@@ -125,6 +125,17 @@ html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, 'Sego
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
+.controls .toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  cursor: pointer;
+  text-transform: none;
+  font-size: 12px;
+  color: #555;
+}
+.controls .toggle-label input { margin: 0; cursor: pointer; width: auto; }
 
 .cluster-icon {
   display: flex;
@@ -588,9 +599,11 @@ var COLORS = {"ARTHAUD Nathalie": "#8B0000", "ASSELINEAU François": "#1B2A49", 
   // --- ZOOM-BASED TOGGLE ---
   var currentMode = null; // 'markers' or 'clusters'
 
+  var clusterEnabled = false;
+
   function updateView() {
     var zoom = map.getZoom();
-    var wantClusters = zoom < CLUSTER_ZOOM;
+    var wantClusters = clusterEnabled && zoom < CLUSTER_ZOOM;
 
     // Always clean up old clusters
     clusterMarkers.forEach(function(m) { map.removeLayer(m); });
@@ -681,7 +694,8 @@ var COLORS = {"ARTHAUD Nathalie": "#8B0000", "ASSELINEAU François": "#1B2A49", 
       + '<div class="pop-filter">'
       + '<div class="pop-row"><label>Min</label><input type="number" id="pop-min" placeholder="0" min="0"></div>'
       + '<div class="pop-row"><label>Max</label><input type="number" id="pop-max" placeholder="∞" min="0"></div>'
-      + '</div>';
+      + '</div>'
+      + '<label class="toggle-label"><input type="checkbox" id="cluster-toggle"> Regrouper par dept.</label>';
     return div;
   };
   controls.addTo(map);
@@ -824,6 +838,11 @@ var COLORS = {"ARTHAUD Nathalie": "#8B0000", "ASSELINEAU François": "#1B2A49", 
   ['pop-min','pop-max','mobile-pop-min','mobile-pop-max'].forEach(function(id) {
     var el = document.getElementById(id);
     if (el) el.addEventListener('input', onPopChange);
+  });
+
+  document.getElementById('cluster-toggle').addEventListener('change', function(e) {
+    clusterEnabled = e.target.checked;
+    updateView();
   });
 
   // --- LEGEND ---
