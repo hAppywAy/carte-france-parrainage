@@ -608,7 +608,7 @@ var COLORS = {"ARTHAUD Nathalie": "#8B0000", "ASSELINEAU François": "#1B2A49", 
   // Create all individual markers
   COMMUNES.forEach(function(c) {
     var color = c.c2 ? getColor(c.c2) : GRAY;
-    var radius = 7;
+    var radius = 5;
     var isReelu = REELUS.has(c.c);
     var opts = {
       radius: radius,
